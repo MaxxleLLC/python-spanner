@@ -12,10 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-
-import unittest
-
 import mock
+import unittest
 
 
 TABLE_NAME = "citizens"
@@ -71,6 +69,8 @@ class TestTransaction(unittest.TestCase):
             self._make_one(session)
 
     def test_ctor_defaults(self):
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
         session = _Session()
         transaction = self._make_one(session)
         self.assertIs(transaction._session, session)
@@ -79,6 +79,7 @@ class TestTransaction(unittest.TestCase):
         self.assertFalse(transaction.rolled_back)
         self.assertTrue(transaction._multi_use)
         self.assertEqual(transaction._execute_sql_count, 0)
+        self.assertIsInstance(transaction.results_checksum, ResultsChecksum)
 
     def test__check_state_not_begun(self):
         session = _Session()
@@ -413,6 +414,35 @@ class TestTransaction(unittest.TestCase):
     def test_execute_update_w_count(self):
         self._execute_update_helper(count=1)
 
+    def test_execute_update_checksum(self):
+        from google.cloud.spanner_v1.proto.result_set_pb2 import (
+            ResultSet,
+            ResultSetStats,
+        )
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        MODE = 2  # PROFILE
+        COUNT = 5
+
+        etalon_checksum = ResultsChecksum()
+        etalon_checksum.consume_result(COUNT)
+
+        stats_pb = ResultSetStats(row_count_exact=COUNT)
+        database = _Database()
+        api = database.spanner_api = self._make_spanner_api()
+        api.execute_sql.return_value = ResultSet(stats=stats_pb)
+        session = _Session(database)
+        transaction = self._make_one(session)
+        transaction._transaction_id = self.TRANSACTION_ID
+        transaction._execute_sql_count = 1
+
+        row_count = transaction.execute_update(
+            DML_QUERY_WITH_PARAM, PARAMS, PARAM_TYPES, query_mode=MODE
+        )
+
+        self.assertEqual(row_count, COUNT)
+        self.assertTrue(etalon_checksum, transaction.results_checksum)
+
     def test_execute_update_error(self):
         database = _Database()
         database.spanner_api = self._make_spanner_api()
@@ -551,6 +581,52 @@ class TestTransaction(unittest.TestCase):
 
         self.assertEqual(transaction._execute_sql_count, 1)
 
+    def test_batch_update_checksum(self):
+        from google.rpc.status_pb2 import Status
+        from google.cloud.spanner_v1.proto.result_set_pb2 import ResultSet
+        from google.cloud.spanner_v1.proto.result_set_pb2 import ResultSetStats
+        from google.cloud.spanner_v1.proto.spanner_pb2 import ExecuteBatchDmlResponse
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        # prepare responses for batch update
+        stats_pbs = [
+            ResultSetStats(row_count_exact=1),
+            ResultSetStats(row_count_exact=2),
+            ResultSetStats(row_count_exact=3),
+        ]
+        response = ExecuteBatchDmlResponse(
+            status=Status(code=200),
+            result_sets=[ResultSet(stats=stats_pb) for stats_pb in stats_pbs],
+        )
+
+        # prepare etalon checksum
+        etalon_checksum = ResultsChecksum()
+        count = [stat_pb.row_count_exact for stat_pb in stats_pbs]
+        etalon_checksum.consume_result(count)
+
+        database = _Database()
+        api = database.spanner_api = self._make_spanner_api()
+        api.execute_batch_dml.return_value = response
+        session = _Session(database)
+        transaction = self._make_one(session)
+        transaction._transaction_id = self.TRANSACTION_ID
+
+        insert_dml = "INSERT INTO table(pkey, desc) VALUES (%pkey, %desc)"
+        insert_params = {"pkey": 12345, "desc": "DESCRIPTION"}
+        insert_param_types = {"pkey": "INT64", "desc": "STRING"}
+        update_dml = 'UPDATE table SET desc = desc + "-amended"'
+        delete_dml = "DELETE FROM table WHERE desc IS NULL"
+
+        dml_statements = [
+            (insert_dml, insert_params, insert_param_types),
+            update_dml,
+            delete_dml,
+        ]
+
+        transaction.batch_update(dml_statements)
+
+        self.assertTrue(etalon_checksum == transaction.results_checksum)
+
     def test_context_mgr_success(self):
         import datetime
         from google.cloud.spanner_v1.proto.spanner_pb2 import CommitResponse
@@ -614,6 +690,56 @@ class TestTransaction(unittest.TestCase):
         self.assertEqual(session_id, session.name)
         self.assertEqual(txn_id, self.TRANSACTION_ID)
         self.assertEqual(metadata, [("google-cloud-resource-prefix", database.name)])
+
+
+class TestResultsChecksum(unittest.TestCase):
+    def _getTargetClass(self):
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        return ResultsChecksum
+
+    def _make_one(self):
+        return self._getTargetClass()()
+
+    def test_consume_result_row(self):
+        ETALON_CHECKSUM = b"\x822\xea\x0ep\xfd\xe6%\x01!\xe6\xb0A?\x11k\xdc\xde\x0c\x0cn\xbcH\x1e\xdf\x12\xb7\xd1:\x1d\x08\xfc"
+
+        checksum = self._make_one()
+        checksum.consume_result(["val1", "val2"])
+
+        self.assertEqual(checksum.checksum.digest(), ETALON_CHECKSUM)
+        self.assertEqual(checksum.count, 1)
+
+    def test_consume_result_int(self):
+        ETALON_CHECKSUM = b"l\x0e\xb4\xa6\xdeeU\xa3.\x85\x93u-\xee \xd1B\x1a\x96\xfd\xed\x96\x1a\xb3y\xb5\xb7\x12a\x0e4\xec"
+
+        checksum = self._make_one()
+        checksum.consume_result(5)
+
+        self.assertEqual(checksum.checksum.digest(), ETALON_CHECKSUM)
+        self.assertEqual(checksum.count, 1)
+
+    def test_comparison(self):
+        DATA = (["val1", "val2"], 5, ["data1", "data2"])
+
+        checksum1 = self._make_one()
+        checksum2 = self._make_one()
+
+        for part in DATA:
+            checksum1.consume_result(part)
+
+        for part in DATA[:2]:
+            checksum2.consume_result(part)
+
+        self.assertTrue(checksum2 < checksum1)
+        self.assertFalse(checksum2 == checksum1)
+
+        checksum2.consume_result(DATA[2])
+        self.assertTrue(checksum2 == checksum1)
+
+        checksum2.count = 5
+        self.assertFalse(checksum2 < checksum1)
+        self.assertFalse(checksum2 == checksum1)
 
 
 class _Client(object):

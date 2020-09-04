@@ -37,9 +37,13 @@ class StreamedResultSet(object):
 
     :type source: :class:`~google.cloud.spanner_v1.snapshot.Snapshot`
     :param source: Snapshot from which the result set was fetched.
+
+    :type results_checksum: :class:`~google.cloud.spanner_v1.transaction.ResultsChecksum`
+    :param results_checksum: A checksum to which streamed rows from this
+                             result set must be added.
     """
 
-    def __init__(self, response_iterator, source=None):
+    def __init__(self, response_iterator, source=None, results_checksum=None):
         self._response_iterator = response_iterator
         self._rows = []  # Fully-processed rows
         self._counter = 0  # Counter for processed responses
@@ -48,6 +52,7 @@ class StreamedResultSet(object):
         self._current_row = []  # Accumulated values for incomplete row
         self._pending_chunk = None  # Incomplete value
         self._source = source  # Source snapshot
+        self._results_checksum = results_checksum
 
     @property
     def fields(self):
@@ -145,7 +150,10 @@ class StreamedResultSet(object):
                     return
                 iter_rows, self._rows[:] = self._rows[:], ()
             while iter_rows:
-                yield iter_rows.pop(0)
+                row = iter_rows.pop(0)
+                if self._results_checksum is not None:
+                    self._results_checksum.consume_result(row)
+                yield row
 
     def one(self):
         """Return exactly one result, or raise an exception.

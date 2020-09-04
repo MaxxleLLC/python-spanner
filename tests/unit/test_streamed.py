@@ -35,6 +35,7 @@ class TestStreamedResultSet(unittest.TestCase):
         self.assertEqual(list(streamed), [])
         self.assertIsNone(streamed.metadata)
         self.assertIsNone(streamed.stats)
+        self.assertIsNone(streamed._results_checksum)
 
     def test_ctor_w_source(self):
         iterator = _MockCancellableIterator()
@@ -43,6 +44,19 @@ class TestStreamedResultSet(unittest.TestCase):
         self.assertIs(streamed._response_iterator, iterator)
         self.assertIs(streamed._source, source)
         self.assertEqual(list(streamed), [])
+        self.assertIsNone(streamed.metadata)
+        self.assertIsNone(streamed.stats)
+
+    def test_ctor_w_checksum(self):
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        checksum = ResultsChecksum()
+        iterator = _MockCancellableIterator()
+        streamed = self._make_one(iterator, results_checksum=checksum)
+
+        self.assertIs(streamed._response_iterator, iterator)
+        self.assertEqual(list(streamed), [])
+        self.assertEqual(streamed._results_checksum, checksum)
         self.assertIsNone(streamed.metadata)
         self.assertIsNone(streamed.stats)
 
@@ -744,6 +758,28 @@ class TestStreamedResultSet(unittest.TestCase):
         streamed = self._make_one(iterator)
         found = list(streamed)
         self.assertEqual(found, [])
+
+    def test___iter___checksum(self):
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        BARE = [u"Phred Phlyntstone", 42]
+        VALUES = [self._make_value(bare) for bare in BARE]
+        FIELDS = [
+            self._make_scalar_field("full_name", "STRING"),
+            self._make_scalar_field("age", "INT64"),
+        ]
+
+        etalon_cs = ResultsChecksum()
+        etalon_cs.consume_result(BARE)
+
+        metadata = self._make_result_set_metadata(FIELDS)
+        result_set = self._make_partial_result_set(VALUES, metadata=metadata)
+        iterator = _MockCancellableIterator(result_set)
+        streamed = self._make_one(iterator, results_checksum=ResultsChecksum())
+        found = list(streamed)
+
+        self.assertEqual(found, [BARE])
+        self.assertTrue(streamed._results_checksum == etalon_cs)
 
     def test___iter___one_result_set_partial(self):
         FIELDS = [

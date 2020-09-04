@@ -14,6 +14,9 @@
 
 """Spanner read-write transaction support."""
 
+import hashlib
+import pickle
+
 from google.protobuf.struct_pb2 import Struct
 
 from google.cloud._helpers import _pb_timestamp_to_datetime
@@ -48,6 +51,15 @@ class Transaction(_SnapshotBase, _BatchBase):
             raise ValueError("Session has existing transaction.")
 
         super(Transaction, self).__init__(session)
+        self._results_checksum = ResultsChecksum()
+
+    @property
+    def results_checksum(self):
+        """
+        Cumulative checksum of all the results returned
+        by all the operations runned within this transaction.
+        """
+        return self._results_checksum
 
     def _check_state(self):
         """Helper for :meth:`commit` et al.
@@ -223,6 +235,7 @@ class Transaction(_SnapshotBase, _BatchBase):
             seqno=seqno,
             metadata=metadata,
         )
+        self._results_checksum.consume_result(response.stats.row_count_exact)
         return response.stats.row_count_exact
 
     def batch_update(self, statements):
@@ -278,6 +291,7 @@ class Transaction(_SnapshotBase, _BatchBase):
         row_counts = [
             result_set.stats.row_count_exact for result_set in response.result_sets
         ]
+        self._results_checksum.consume_result(row_counts)
         return response.status, row_counts
 
     def __enter__(self):
@@ -291,3 +305,50 @@ class Transaction(_SnapshotBase, _BatchBase):
             self.commit()
         else:
             self.rollback()
+
+
+class ResultsChecksum:
+    """Cumulative checksum.
+
+    Used to calculate a total checksum of all the results
+    returned by operations executed within transaction.
+    Includes methods for checksums comparison.
+
+    These checksums are used while retrying an aborted
+    transaction to check if the results of a retried transaction
+    are equal to the results of the original transaction.
+    """
+
+    def __init__(self):
+        self.checksum = hashlib.sha256()
+        self.count = 0  # counter of consumed results
+
+    def __eq__(self, other):
+        """Check if checksums are equal.
+
+        Args:
+            other (ResultsCheckSum):
+                Another checksum to compare with this one.
+        """
+        same_count = self.count == other.count
+        same_checksum = self.checksum.digest() == other.checksum.digest()
+        return same_count and same_checksum
+
+    def __lt__(self, other):
+        """Check if this checksum have less results than the given one.
+
+        Args:
+            other (ResultsCheckSum):
+                Another checksum to compare with this one.
+        """
+        return self.count < other.count
+
+    def consume_result(self, result):
+        """Add the given result into the checksum.
+
+        Args:
+            result (Union[int, list]):
+                Streamed row or row count from an UPDATE operation.
+        """
+        self.checksum.update(pickle.dumps(result))
+        self.count += 1
