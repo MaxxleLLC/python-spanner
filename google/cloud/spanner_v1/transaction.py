@@ -341,7 +341,7 @@ class ResultsChecksum:
         """Check if checksums are equal.
 
         Args:
-            other (ResultsCheckSum):
+            other (ResultsChecksum):
                 Another checksum to compare with this one.
         """
         same_count = self.count == other.count
@@ -352,7 +352,7 @@ class ResultsChecksum:
         """Check if this checksum have less results than the given one.
 
         Args:
-            other (ResultsCheckSum):
+            other (ResultsChecksum):
                 Another checksum to compare with this one.
         """
         return self.count < other.count

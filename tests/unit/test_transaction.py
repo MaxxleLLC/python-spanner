@@ -501,7 +501,7 @@ class TestTransaction(OpenTelemetryBase):
         )
 
         self.assertEqual(row_count, COUNT)
-        self.assertTrue(etalon_checksum, transaction.results_checksum)
+        self.assertTrue(etalon_checksum == transaction.results_checksum)
 
     def test_execute_update_error(self):
         database = _Database()
