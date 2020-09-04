@@ -46,7 +46,6 @@ class StreamedResultSet(object):
     def __init__(self, response_iterator, source=None, results_checksum=None):
         self._response_iterator = response_iterator
         self._rows = []  # Fully-processed rows
-        self._counter = 0  # Counter for processed responses
         self._metadata = None  # Until set from first PRS
         self._stats = None  # Until set from last PRS
         self._current_row = []  # Accumulated values for incomplete row
@@ -119,7 +118,6 @@ class StreamedResultSet(object):
         Parse the result set into new/existing rows in :attr:`_rows`
         """
         response = six.next(self._response_iterator)
-        self._counter += 1
 
         if self._metadata is None:  # first response
             metadata = self._metadata = response.metadata

@@ -14,6 +14,7 @@
 
 import mock
 import unittest
+from tests._helpers import OpenTelemetryBase, StatusCanonicalCode
 
 
 TABLE_NAME = "citizens"
@@ -34,7 +35,7 @@ PARAMS = {"age": 30}
 PARAM_TYPES = {"age": "INT64"}
 
 
-class TestTransaction(unittest.TestCase):
+class TestTransaction(OpenTelemetryBase):
 
     PROJECT_ID = "project-id"
     INSTANCE_ID = "instance-id"
@@ -44,6 +45,13 @@ class TestTransaction(unittest.TestCase):
     SESSION_ID = "session-id"
     SESSION_NAME = DATABASE_NAME + "/sessions/" + SESSION_ID
     TRANSACTION_ID = b"DEADBEEF"
+
+    BASE_ATTRIBUTES = {
+        "db.type": "spanner",
+        "db.url": "spanner.googleapis.com:443",
+        "db.instance": "testing",
+        "net.host.name": "spanner.googleapis.com:443",
+    }
 
     def _getTargetClass(self):
         from google.cloud.spanner_v1.transaction import Transaction
@@ -123,6 +131,8 @@ class TestTransaction(unittest.TestCase):
         with self.assertRaises(ValueError):
             transaction.begin()
 
+        self.assertNoSpans()
+
     def test_begin_already_rolled_back(self):
         session = _Session()
         transaction = self._make_one(session)
@@ -130,12 +140,16 @@ class TestTransaction(unittest.TestCase):
         with self.assertRaises(ValueError):
             transaction.begin()
 
+        self.assertNoSpans()
+
     def test_begin_already_committed(self):
         session = _Session()
         transaction = self._make_one(session)
         transaction.committed = object()
         with self.assertRaises(ValueError):
             transaction.begin()
+
+        self.assertNoSpans()
 
     def test_begin_w_other_error(self):
         database = _Database()
@@ -146,6 +160,12 @@ class TestTransaction(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             transaction.begin()
+
+        self.assertSpanAttributes(
+            "CloudSpanner.BeginTransaction",
+            status=StatusCanonicalCode.UNKNOWN,
+            attributes=TestTransaction.BASE_ATTRIBUTES,
+        )
 
     def test_begin_ok(self):
         from google.cloud.spanner_v1.proto.transaction_pb2 import (
@@ -170,11 +190,17 @@ class TestTransaction(unittest.TestCase):
         self.assertTrue(txn_options.HasField("read_write"))
         self.assertEqual(metadata, [("google-cloud-resource-prefix", database.name)])
 
+        self.assertSpanAttributes(
+            "CloudSpanner.BeginTransaction", attributes=TestTransaction.BASE_ATTRIBUTES
+        )
+
     def test_rollback_not_begun(self):
         session = _Session()
         transaction = self._make_one(session)
         with self.assertRaises(ValueError):
             transaction.rollback()
+
+        self.assertNoSpans()
 
     def test_rollback_already_committed(self):
         session = _Session()
@@ -184,6 +210,8 @@ class TestTransaction(unittest.TestCase):
         with self.assertRaises(ValueError):
             transaction.rollback()
 
+        self.assertNoSpans()
+
     def test_rollback_already_rolled_back(self):
         session = _Session()
         transaction = self._make_one(session)
@@ -191,6 +219,8 @@ class TestTransaction(unittest.TestCase):
         transaction.rolled_back = True
         with self.assertRaises(ValueError):
             transaction.rollback()
+
+        self.assertNoSpans()
 
     def test_rollback_w_other_error(self):
         database = _Database()
@@ -205,6 +235,12 @@ class TestTransaction(unittest.TestCase):
             transaction.rollback()
 
         self.assertFalse(transaction.rolled_back)
+
+        self.assertSpanAttributes(
+            "CloudSpanner.Rollback",
+            status=StatusCanonicalCode.UNKNOWN,
+            attributes=TestTransaction.BASE_ATTRIBUTES,
+        )
 
     def test_rollback_ok(self):
         from google.protobuf.empty_pb2 import Empty
@@ -227,11 +263,17 @@ class TestTransaction(unittest.TestCase):
         self.assertEqual(txn_id, self.TRANSACTION_ID)
         self.assertEqual(metadata, [("google-cloud-resource-prefix", database.name)])
 
+        self.assertSpanAttributes(
+            "CloudSpanner.Rollback", attributes=TestTransaction.BASE_ATTRIBUTES
+        )
+
     def test_commit_not_begun(self):
         session = _Session()
         transaction = self._make_one(session)
         with self.assertRaises(ValueError):
             transaction.commit()
+
+        self.assertNoSpans()
 
     def test_commit_already_committed(self):
         session = _Session()
@@ -241,6 +283,8 @@ class TestTransaction(unittest.TestCase):
         with self.assertRaises(ValueError):
             transaction.commit()
 
+        self.assertNoSpans()
+
     def test_commit_already_rolled_back(self):
         session = _Session()
         transaction = self._make_one(session)
@@ -248,6 +292,8 @@ class TestTransaction(unittest.TestCase):
         transaction.rolled_back = True
         with self.assertRaises(ValueError):
             transaction.commit()
+
+        self.assertNoSpans()
 
     def test_commit_w_other_error(self):
         database = _Database()
@@ -262,6 +308,12 @@ class TestTransaction(unittest.TestCase):
             transaction.commit()
 
         self.assertIsNone(transaction.committed)
+
+        self.assertSpanAttributes(
+            "CloudSpanner.Commit",
+            status=StatusCanonicalCode.UNKNOWN,
+            attributes=dict(TestTransaction.BASE_ATTRIBUTES, num_mutations=1),
+        )
 
     def _commit_helper(self, mutate=True):
         import datetime
@@ -294,6 +346,14 @@ class TestTransaction(unittest.TestCase):
         self.assertEqual(txn_id, self.TRANSACTION_ID)
         self.assertEqual(mutations, transaction._mutations)
         self.assertEqual(metadata, [("google-cloud-resource-prefix", database.name)])
+
+        self.assertSpanAttributes(
+            "CloudSpanner.Commit",
+            attributes=dict(
+                TestTransaction.BASE_ATTRIBUTES,
+                num_mutations=len(transaction._mutations),
+            ),
+        )
 
     def test_commit_no_mutations(self):
         self._commit_helper(mutate=False)
