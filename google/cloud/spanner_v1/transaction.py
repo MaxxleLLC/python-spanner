@@ -19,6 +19,7 @@ import pickle
 
 from google.protobuf.struct_pb2 import Struct
 
+from google.api_core.exceptions import Aborted
 from google.cloud._helpers import _pb_timestamp_to_datetime
 from google.cloud.spanner_v1._helpers import (
     _make_value_pb,
@@ -38,6 +39,10 @@ class Transaction(_SnapshotBase, _BatchBase):
     :type session: :class:`~google.cloud.spanner_v1.session.Session`
     :param session: the session used to perform the commit
 
+    :type original_results_checksum: :class:`~google.cloud.spanner_v1.transaction.ResultsChecksum`
+    :param original_results_checksum: results checksum of the
+                                      original transaction.
+
     :raises ValueError: if session has an existing transaction
     """
 
@@ -47,12 +52,13 @@ class Transaction(_SnapshotBase, _BatchBase):
     _multi_use = True
     _execute_sql_count = 0
 
-    def __init__(self, session):
+    def __init__(self, session, original_results_checksum=None):
         if session._transaction is not None:
             raise ValueError("Session has existing transaction.")
 
         super(Transaction, self).__init__(session)
         self._results_checksum = ResultsChecksum()
+        self._original_results_checksum = original_results_checksum
 
     @property
     def results_checksum(self):
@@ -245,6 +251,12 @@ class Transaction(_SnapshotBase, _BatchBase):
                 metadata=metadata,
             )
         self._results_checksum.consume_result(response.stats.row_count_exact)
+
+        if self._original_results_checksum is not None:
+            if self._results_checksum != self._original_results_checksum:
+                if not self._results_checksum < self._original_results_checksum:
+                    raise Aborted("The underlying data being changed while retrying.")
+
         return response.stats.row_count_exact
 
     def batch_update(self, statements):
@@ -306,6 +318,12 @@ class Transaction(_SnapshotBase, _BatchBase):
             result_set.stats.row_count_exact for result_set in response.result_sets
         ]
         self._results_checksum.consume_result(row_counts)
+
+        if self._original_results_checksum is not None:
+            if self._results_checksum != self._original_results_checksum:
+                if not self._results_checksum < self._original_results_checksum:
+                    raise Aborted("The underlying data being changed while retrying.")
+
         return response.status, row_counts
 
     def __enter__(self):
@@ -347,6 +365,17 @@ class ResultsChecksum:
         same_count = self.count == other.count
         same_checksum = self.checksum.digest() == other.checksum.digest()
         return same_count and same_checksum
+
+    def __ne__(self, other):
+        """Check if checksums aren't equal.
+
+        Args:
+            other (ResultsChecksum):
+                Another checksum to compare with this one.
+        """
+        same_count = self.count != other.count
+        same_checksum = self.checksum.digest() != other.checksum.digest()
+        return same_count or same_checksum
 
     def __lt__(self, other):
         """Check if this checksum have less results than the given one.

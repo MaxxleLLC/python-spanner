@@ -14,6 +14,7 @@
 
 """Wrapper for streaming results."""
 
+from google.api_core.exceptions import Aborted
 from google.protobuf.struct_pb2 import ListValue
 from google.protobuf.struct_pb2 import Value
 from google.cloud import exceptions
@@ -41,9 +42,19 @@ class StreamedResultSet(object):
     :type results_checksum: :class:`~google.cloud.spanner_v1.transaction.ResultsChecksum`
     :param results_checksum: A checksum to which streamed rows from this
                              result set must be added.
+
+    :type original_results_checksum: :class:`~google.cloud.spanner_v1.transaction.ResultsChecksum`
+    :param original_results_checksum: Results checksum of the original
+                                      transaction.
     """
 
-    def __init__(self, response_iterator, source=None, results_checksum=None):
+    def __init__(
+        self,
+        response_iterator,
+        source=None,
+        results_checksum=None,
+        original_results_checksum=None,
+    ):
         self._response_iterator = response_iterator
         self._rows = []  # Fully-processed rows
         self._metadata = None  # Until set from first PRS
@@ -52,6 +63,7 @@ class StreamedResultSet(object):
         self._pending_chunk = None  # Incomplete value
         self._source = source  # Source snapshot
         self._results_checksum = results_checksum
+        self._original_results_checksum = original_results_checksum
 
     @property
     def fields(self):
@@ -151,6 +163,16 @@ class StreamedResultSet(object):
                 row = iter_rows.pop(0)
                 if self._results_checksum is not None:
                     self._results_checksum.consume_result(row)
+
+                    if self._original_results_checksum is not None:
+                        if self._results_checksum != self._original_results_checksum:
+                            if (
+                                not self._results_checksum
+                                < self._original_results_checksum
+                            ):
+                                raise Aborted(
+                                    "The underlying data being changed while retrying."
+                                )
                 yield row
 
     def one(self):

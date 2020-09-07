@@ -278,8 +278,12 @@ class Session(object):
 
         return Batch(self)
 
-    def transaction(self):
+    def transaction(self, original_results_checksum=None):
         """Create a transaction to perform a set of reads with shared staleness.
+
+        :type original_results_checksum: :class:`~google.cloud.spanner_v1.transaction.ResultsChecksum`
+        :param original_results_checksum: original transaction results
+                                          checksum.
 
         :rtype: :class:`~google.cloud.spanner_v1.transaction.Transaction`
         :returns: a transaction bound to this session
@@ -292,7 +296,9 @@ class Session(object):
             self._transaction.rolled_back = True
             del self._transaction
 
-        txn = self._transaction = Transaction(self)
+        txn = self._transaction = Transaction(
+            self, original_results_checksum=original_results_checksum
+        )
         return txn
 
     def run_in_transaction(self, func, *args, **kw):
@@ -319,11 +325,12 @@ class Session(object):
             reraises any non-ABORT execptions raised by ``func``.
         """
         deadline = time.time() + kw.pop("timeout_secs", DEFAULT_RETRY_TIMEOUT_SECS)
+        original_results_checksum = None
         attempts = 0
 
         while True:
             if self._transaction is None:
-                txn = self.transaction()
+                txn = self.transaction(original_results_checksum)
             else:
                 txn = self._transaction
             if txn._transaction_id is None:
@@ -333,6 +340,8 @@ class Session(object):
                 attempts += 1
                 return_value = func(txn, *args, **kw)
             except Aborted as exc:
+                if attempts == 0:
+                    original_results_checksum = self._transaction.results_checksum
                 del self._transaction
                 _delay_until_retry(exc, deadline, attempts)
                 continue
@@ -346,6 +355,8 @@ class Session(object):
             try:
                 txn.commit()
             except Aborted as exc:
+                if attempts == 0:
+                    original_results_checksum = self._transaction.results_checksum
                 del self._transaction
                 _delay_until_retry(exc, deadline, attempts)
             except GoogleAPICallError:

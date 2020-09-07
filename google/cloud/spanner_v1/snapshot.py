@@ -175,10 +175,17 @@ class _SnapshotBase(_SessionWrapper):
                 iterator,
                 source=self,
                 results_checksum=getattr(self, "results_checksum", None),
+                original_results_checksum=getattr(
+                    self, "_original_results_checksum", None
+                ),
             )
         else:
             return StreamedResultSet(
-                iterator, results_checksum=getattr(self, "results_checksum", None)
+                iterator,
+                results_checksum=getattr(self, "results_checksum", None),
+                original_results_checksum=getattr(
+                    self, "_original_results_checksum", None
+                ),
             )
 
     def execute_sql(
@@ -288,11 +295,17 @@ class _SnapshotBase(_SessionWrapper):
                 iterator,
                 source=self,
                 results_checksum=getattr(self, "results_checksum", None),
+                original_results_checksum=getattr(
+                    self, "_original_results_checksum", None
+                ),
             )
         else:
             return StreamedResultSet(
                 iterator,
                 results_checksum=getattr(self, "results_checksum", None),
+                original_results_checksum=getattr(
+                    self, "_original_results_checksum", None
+                ),
             )
 
     def partition_read(

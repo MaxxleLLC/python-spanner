@@ -84,10 +84,19 @@ class TestTransaction(OpenTelemetryBase):
         self.assertIs(transaction._session, session)
         self.assertIsNone(transaction._transaction_id)
         self.assertIsNone(transaction.committed)
+        self.assertIsNone(transaction._original_results_checksum)
         self.assertFalse(transaction.rolled_back)
         self.assertTrue(transaction._multi_use)
         self.assertEqual(transaction._execute_sql_count, 0)
         self.assertIsInstance(transaction.results_checksum, ResultsChecksum)
+
+    def test_ctor_original_checksum(self):
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        session = _Session()
+        orig_checksum = ResultsChecksum()
+        transaction = self._make_one(session, orig_checksum)
+        self.assertEqual(orig_checksum, transaction._original_results_checksum)
 
     def test__check_state_not_begun(self):
         session = _Session()
@@ -481,7 +490,6 @@ class TestTransaction(OpenTelemetryBase):
         )
         from google.cloud.spanner_v1.transaction import ResultsChecksum
 
-        MODE = 2  # PROFILE
         COUNT = 5
 
         etalon_checksum = ResultsChecksum()
@@ -497,11 +505,39 @@ class TestTransaction(OpenTelemetryBase):
         transaction._execute_sql_count = 1
 
         row_count = transaction.execute_update(
-            DML_QUERY_WITH_PARAM, PARAMS, PARAM_TYPES, query_mode=MODE
+            DML_QUERY_WITH_PARAM, PARAMS, PARAM_TYPES, query_mode=2
         )
 
         self.assertEqual(row_count, COUNT)
         self.assertTrue(etalon_checksum == transaction.results_checksum)
+
+    def test_execute_update_checksum_mismatch(self):
+        from google.api_core.exceptions import Aborted
+        from google.cloud.spanner_v1.proto.result_set_pb2 import (
+            ResultSet,
+            ResultSetStats,
+        )
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        COUNT = 5
+
+        database = _Database()
+        api = database.spanner_api = self._make_spanner_api()
+        api.execute_sql.return_value = ResultSet(
+            stats=ResultSetStats(row_count_exact=COUNT)
+        )
+        session = _Session(database)
+
+        transaction = self._make_one(session)
+        transaction._transaction_id = self.TRANSACTION_ID
+        transaction._execute_sql_count = 1
+        transaction._original_results_checksum = ResultsChecksum()
+        transaction._original_results_checksum.consume_result(10)
+
+        with self.assertRaises(Aborted):
+            transaction.execute_update(
+                DML_QUERY_WITH_PARAM, PARAMS, PARAM_TYPES, query_mode=2
+            )
 
     def test_execute_update_error(self):
         database = _Database()
@@ -687,6 +723,44 @@ class TestTransaction(OpenTelemetryBase):
 
         self.assertTrue(etalon_checksum == transaction.results_checksum)
 
+    def test_batch_update_checksum_mismatch(self):
+        from google.api_core.exceptions import Aborted
+        from google.rpc.status_pb2 import Status
+        from google.cloud.spanner_v1.proto.result_set_pb2 import ResultSet
+        from google.cloud.spanner_v1.proto.result_set_pb2 import ResultSetStats
+        from google.cloud.spanner_v1.proto.spanner_pb2 import ExecuteBatchDmlResponse
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        # prepare responses for batch update
+        stats_pbs = [
+            ResultSetStats(row_count_exact=1),
+            ResultSetStats(row_count_exact=2),
+            ResultSetStats(row_count_exact=3),
+        ]
+        response = ExecuteBatchDmlResponse(
+            status=Status(code=200),
+            result_sets=[ResultSet(stats=stats_pb) for stats_pb in stats_pbs],
+        )
+
+        database = _Database()
+        api = database.spanner_api = self._make_spanner_api()
+        api.execute_batch_dml.return_value = response
+        session = _Session(database)
+        transaction = self._make_one(session)
+        transaction._transaction_id = self.TRANSACTION_ID
+        transaction._original_results_checksum = ResultsChecksum()
+        transaction._original_results_checksum.consume_result(8)
+
+        insert_dml = "INSERT INTO table(pkey, desc) VALUES (%pkey, %desc)"
+        insert_params = {"pkey": 12345, "desc": "DESCRIPTION"}
+        insert_param_types = {"pkey": "INT64", "desc": "STRING"}
+        update_dml = 'UPDATE table SET desc = desc + "-amended"'
+
+        dml_statements = [(insert_dml, insert_params, insert_param_types), update_dml]
+
+        with self.assertRaises(Aborted):
+            transaction.batch_update(dml_statements)
+
     def test_context_mgr_success(self):
         import datetime
         from google.cloud.spanner_v1.proto.spanner_pb2 import CommitResponse
@@ -819,6 +893,73 @@ class TestTransaction(OpenTelemetryBase):
 
         self.assertTrue(checksum == transaction.results_checksum)
 
+    def test_read_checksum_mismatch(self):
+        import datetime
+        from google.api_core.exceptions import Aborted
+        from google.cloud.spanner_v1.keyset import KeySet
+        from google.cloud.spanner_v1.proto.result_set_pb2 import (
+            PartialResultSet,
+            ResultSetMetadata,
+        )
+        from google.cloud.spanner_v1.proto.spanner_pb2 import CommitResponse
+        from google.cloud.spanner_v1.proto.transaction_pb2 import (
+            Transaction as TransactionPB,
+        )
+        from google.cloud.spanner_v1.proto.type_pb2 import (
+            STRING,
+            INT64,
+            Type,
+            StructType,
+        )
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+        from google.cloud.spanner_v1._helpers import _make_value_pb
+        from google.cloud._helpers import UTC, _datetime_to_pb_timestamp
+        from google.protobuf.empty_pb2 import Empty
+        from .test_snapshot import _MockIterator
+
+        # mock transaction and data to read
+        VALUES = [[u"bharney", 31], [u"phred", 32]]
+        VALUE_PBS = [[_make_value_pb(item) for item in row] for row in VALUES]
+
+        struct_type_pb = StructType(
+            fields=[
+                StructType.Field(name="name", type=Type(code=STRING)),
+                StructType.Field(name="age", type=Type(code=INT64)),
+            ]
+        )
+        database = _Database()
+        transaction = self._make_one(_Session(database))
+
+        result_sets = [
+            PartialResultSet(
+                values=VALUE_PBS[0], metadata=ResultSetMetadata(row_type=struct_type_pb)
+            ),
+            PartialResultSet(values=VALUE_PBS[1]),
+        ]
+        now_pb = _datetime_to_pb_timestamp(
+            datetime.datetime.utcnow().replace(tzinfo=UTC)
+        )
+        api = database.spanner_api = _FauxSpannerAPI(
+            _begin_transaction_response=TransactionPB(id=self.TRANSACTION_ID),
+            _commit_response=CommitResponse(commit_timestamp=now_pb),
+            _rollback_response=Empty(),
+        )
+        api.streaming_read = mock.Mock(return_value=_MockIterator(*result_sets))
+
+        transaction._original_results_checksum = ResultsChecksum()
+        transaction._original_results_checksum.consume_result(5)
+
+        # run reading
+        with self.assertRaises(Aborted):
+            with transaction:
+                list(
+                    transaction.read(
+                        "citizens",
+                        ["email", "first_name", "last_name", "age"],
+                        KeySet(all_=True),
+                    )
+                )
+
     def test_execute_sql_checksum(self):
         import datetime
         from google.cloud.spanner_v1.proto.result_set_pb2 import (
@@ -892,6 +1033,76 @@ SELECT first_name, last_name, email FROM citizens WHERE age <= @max_age"""
 
         self.assertTrue(checksum == transaction.results_checksum)
 
+    def test_execute_sql_checksum_mismatch(self):
+        import datetime
+        from google.api_core.exceptions import Aborted
+        from google.cloud.spanner_v1.proto.result_set_pb2 import (
+            PartialResultSet,
+            ResultSetMetadata,
+        )
+        from google.cloud.spanner_v1.proto.spanner_pb2 import CommitResponse
+        from google.cloud.spanner_v1.proto.transaction_pb2 import (
+            Transaction as TransactionPB,
+        )
+        from google.cloud.spanner_v1.proto.type_pb2 import (
+            STRING,
+            INT64,
+            Type,
+            StructType,
+        )
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+        from google.cloud.spanner_v1._helpers import _make_value_pb
+        from google.cloud._helpers import UTC, _datetime_to_pb_timestamp
+        from google.protobuf.empty_pb2 import Empty
+        from .test_snapshot import _MockIterator
+
+        # mock transaction and data process
+        VALUES = [[u"bharney", u"rhubbyl", 31], [u"phred", u"phlyntstone", 32]]
+        VALUE_PBS = [[_make_value_pb(item) for item in row] for row in VALUES]
+
+        SQL_QUERY_WITH_PARAM = """
+SELECT first_name, last_name, email FROM citizens WHERE age <= @max_age"""
+        PARAMS = {"max_age": 30}
+        PARAM_TYPES = {"max_age": "INT64"}
+
+        struct_type_pb = StructType(
+            fields=[
+                StructType.Field(name="first_name", type=Type(code=STRING)),
+                StructType.Field(name="last_name", type=Type(code=STRING)),
+                StructType.Field(name="age", type=Type(code=INT64)),
+            ]
+        )
+        database = _Database()
+        transaction = self._make_one(_Session(database))
+
+        result_sets = [
+            PartialResultSet(
+                values=VALUE_PBS[0], metadata=ResultSetMetadata(row_type=struct_type_pb)
+            ),
+            PartialResultSet(values=VALUE_PBS[1]),
+        ]
+        now_pb = _datetime_to_pb_timestamp(
+            datetime.datetime.utcnow().replace(tzinfo=UTC)
+        )
+        api = database.spanner_api = _FauxSpannerAPI(
+            _begin_transaction_response=TransactionPB(id=self.TRANSACTION_ID),
+            _commit_response=CommitResponse(commit_timestamp=now_pb),
+            _rollback_response=Empty(),
+        )
+        api.execute_streaming_sql = mock.Mock(return_value=_MockIterator(*result_sets))
+
+        transaction._original_results_checksum = ResultsChecksum()
+        transaction._original_results_checksum.consume_result(7)
+
+        # run SQL query
+        with self.assertRaises(Aborted):
+            with transaction:
+                list(
+                    transaction.execute_sql(
+                        SQL_QUERY_WITH_PARAM, PARAMS, PARAM_TYPES, query_mode=2
+                    )
+                )
+
 
 class TestResultsChecksum(unittest.TestCase):
     def _getTargetClass(self):
@@ -933,6 +1144,7 @@ class TestResultsChecksum(unittest.TestCase):
             checksum2.consume_result(part)
 
         self.assertTrue(checksum2 < checksum1)
+        self.assertTrue(checksum2 != checksum1)
         self.assertFalse(checksum2 == checksum1)
 
         checksum2.consume_result(DATA[2])
@@ -941,6 +1153,7 @@ class TestResultsChecksum(unittest.TestCase):
         checksum2.count = 5
         self.assertFalse(checksum2 < checksum1)
         self.assertFalse(checksum2 == checksum1)
+        self.assertTrue(checksum2 != checksum1)
 
 
 class _Client(object):
