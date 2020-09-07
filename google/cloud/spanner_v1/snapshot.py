@@ -171,9 +171,15 @@ class _SnapshotBase(_SessionWrapper):
         self._read_request_count += 1
 
         if self._multi_use:
-            return StreamedResultSet(iterator, source=self)
+            return StreamedResultSet(
+                iterator,
+                source=self,
+                results_checksum=getattr(self, "results_checksum", None),
+            )
         else:
-            return StreamedResultSet(iterator)
+            return StreamedResultSet(
+                iterator, results_checksum=getattr(self, "results_checksum", None)
+            )
 
     def execute_sql(
         self,
@@ -278,9 +284,16 @@ class _SnapshotBase(_SessionWrapper):
         self._execute_sql_count += 1
 
         if self._multi_use:
-            return StreamedResultSet(iterator, source=self)
+            return StreamedResultSet(
+                iterator,
+                source=self,
+                results_checksum=getattr(self, "results_checksum", None),
+            )
         else:
-            return StreamedResultSet(iterator)
+            return StreamedResultSet(
+                iterator,
+                results_checksum=getattr(self, "results_checksum", None),
+            )
 
     def partition_read(
         self,

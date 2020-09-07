@@ -751,6 +751,147 @@ class TestTransaction(OpenTelemetryBase):
         self.assertEqual(txn_id, self.TRANSACTION_ID)
         self.assertEqual(metadata, [("google-cloud-resource-prefix", database.name)])
 
+    def test_read_checksum(self):
+        import datetime
+        from google.cloud.spanner_v1.keyset import KeySet
+        from google.cloud.spanner_v1.proto.result_set_pb2 import (
+            PartialResultSet,
+            ResultSetMetadata,
+        )
+        from google.cloud.spanner_v1.proto.spanner_pb2 import CommitResponse
+        from google.cloud.spanner_v1.proto.transaction_pb2 import (
+            Transaction as TransactionPB,
+        )
+        from google.cloud.spanner_v1.proto.type_pb2 import (
+            STRING,
+            INT64,
+            Type,
+            StructType,
+        )
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+        from google.cloud.spanner_v1._helpers import _make_value_pb
+        from google.cloud._helpers import UTC, _datetime_to_pb_timestamp
+        from .test_snapshot import _MockIterator
+
+        # mock transaction and data to read
+        VALUES = [[u"bharney", 31], [u"phred", 32]]
+        VALUE_PBS = [[_make_value_pb(item) for item in row] for row in VALUES]
+
+        struct_type_pb = StructType(
+            fields=[
+                StructType.Field(name="name", type=Type(code=STRING)),
+                StructType.Field(name="age", type=Type(code=INT64)),
+            ]
+        )
+        database = _Database()
+        transaction = self._make_one(_Session(database))
+
+        result_sets = [
+            PartialResultSet(
+                values=VALUE_PBS[0], metadata=ResultSetMetadata(row_type=struct_type_pb)
+            ),
+            PartialResultSet(values=VALUE_PBS[1]),
+        ]
+        now_pb = _datetime_to_pb_timestamp(
+            datetime.datetime.utcnow().replace(tzinfo=UTC)
+        )
+        api = database.spanner_api = _FauxSpannerAPI(
+            _begin_transaction_response=TransactionPB(id=self.TRANSACTION_ID),
+            _commit_response=CommitResponse(commit_timestamp=now_pb),
+        )
+        api.streaming_read = mock.Mock(return_value=_MockIterator(*result_sets))
+
+        checksum = ResultsChecksum()
+
+        # run reading
+        with transaction:
+            results = list(
+                transaction.read(
+                    "citizens",
+                    ["email", "first_name", "last_name", "age"],
+                    KeySet(all_=True),
+                )
+            )
+
+        # calculate expected checksum
+        for row in results:
+            checksum.consume_result(row)
+
+        self.assertTrue(checksum, transaction.results_checksum)
+
+    def test_execute_sql_checksum(self):
+        import datetime
+        from google.cloud.spanner_v1.proto.result_set_pb2 import (
+            PartialResultSet,
+            ResultSetMetadata,
+        )
+        from google.cloud.spanner_v1.proto.spanner_pb2 import CommitResponse
+        from google.cloud.spanner_v1.proto.transaction_pb2 import (
+            Transaction as TransactionPB,
+        )
+        from google.cloud.spanner_v1.proto.type_pb2 import (
+            STRING,
+            INT64,
+            Type,
+            StructType,
+        )
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+        from google.cloud.spanner_v1._helpers import _make_value_pb
+        from google.cloud._helpers import UTC, _datetime_to_pb_timestamp
+        from google.protobuf.empty_pb2 import Empty
+        from .test_snapshot import _MockIterator
+
+        # mock transaction and data process
+        VALUES = [[u"bharney", u"rhubbyl", 31], [u"phred", u"phlyntstone", 32]]
+        VALUE_PBS = [[_make_value_pb(item) for item in row] for row in VALUES]
+
+        SQL_QUERY_WITH_PARAM = """
+SELECT first_name, last_name, email FROM citizens WHERE age <= @max_age"""
+        PARAMS = {"max_age": 30}
+        PARAM_TYPES = {"max_age": "INT64"}
+
+        struct_type_pb = StructType(
+            fields=[
+                StructType.Field(name="first_name", type=Type(code=STRING)),
+                StructType.Field(name="last_name", type=Type(code=STRING)),
+                StructType.Field(name="age", type=Type(code=INT64)),
+            ]
+        )
+        database = _Database()
+        transaction = self._make_one(_Session(database))
+
+        result_sets = [
+            PartialResultSet(
+                values=VALUE_PBS[0], metadata=ResultSetMetadata(row_type=struct_type_pb)
+            ),
+            PartialResultSet(values=VALUE_PBS[1]),
+        ]
+        now_pb = _datetime_to_pb_timestamp(
+            datetime.datetime.utcnow().replace(tzinfo=UTC)
+        )
+        api = database.spanner_api = _FauxSpannerAPI(
+            _begin_transaction_response=TransactionPB(id=self.TRANSACTION_ID),
+            _commit_response=CommitResponse(commit_timestamp=now_pb),
+            _rollback_response=Empty(),
+        )
+        api.execute_streaming_sql = mock.Mock(return_value=_MockIterator(*result_sets))
+
+        checksum = ResultsChecksum()
+
+        # run SQL query
+        with transaction:
+            results = list(
+                transaction.execute_sql(
+                    SQL_QUERY_WITH_PARAM, PARAMS, PARAM_TYPES, query_mode=2
+                )
+            )
+
+        # calculate expected checksum
+        for row in results:
+            checksum.consume_result(row)
+
+        self.assertTrue(checksum, transaction.results_checksum)
+
 
 class TestResultsChecksum(unittest.TestCase):
     def _getTargetClass(self):
