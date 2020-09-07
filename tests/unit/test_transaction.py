@@ -817,7 +817,7 @@ class TestTransaction(OpenTelemetryBase):
         for row in results:
             checksum.consume_result(row)
 
-        self.assertTrue(checksum, transaction.results_checksum)
+        self.assertTrue(checksum == transaction.results_checksum)
 
     def test_execute_sql_checksum(self):
         import datetime
@@ -890,7 +890,7 @@ SELECT first_name, last_name, email FROM citizens WHERE age <= @max_age"""
         for row in results:
             checksum.consume_result(row)
 
-        self.assertTrue(checksum, transaction.results_checksum)
+        self.assertTrue(checksum == transaction.results_checksum)
 
 
 class TestResultsChecksum(unittest.TestCase):
