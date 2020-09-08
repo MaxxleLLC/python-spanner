@@ -1146,6 +1146,81 @@ class TestSession(OpenTelemetryBase):
             metadata=[("google-cloud-resource-prefix", database.name)],
         )
 
+    def test_run_in_transaction_w_abort_checksum_mismatch(self):
+        from google.api_core.exceptions import Aborted
+        from google.cloud.spanner_v1.proto.transaction_pb2 import (
+            Transaction as TransactionPB,
+        )
+        from google.cloud.spanner_v1._helpers import _make_value_pb
+        from google.cloud.spanner_v1.proto.result_set_pb2 import (
+            PartialResultSet,
+            ResultSetMetadata,
+        )
+        from google.cloud.spanner_v1.proto.type_pb2 import (
+            STRING,
+            INT64,
+            Type,
+            StructType,
+        )
+        from .test_snapshot import _MockIterator
+        from .test_transaction import _Database
+
+        SQL_QUERY = """
+SELECT first_name, last_name, email FROM citizens WHERE age <= @max_age"""
+        PARAMS = {"max_age": 30}
+        SQL_QUERY2 = """
+SELECT last_name FROM citizens WHERE age > @max_age"""
+        PARAMS2 = {"max_age": 70}
+        PARAM_TYPES = {"max_age": "INT64"}
+
+        VALUES = [[u"bharney", u"rhubbyl", 31], [u"phred", u"phlyntstone", 32]]
+        VALUE_PBS = [[_make_value_pb(item) for item in row] for row in VALUES]
+
+        struct_type_pb = StructType(
+            fields=[
+                StructType.Field(name="first_name", type=Type(code=STRING)),
+                StructType.Field(name="last_name", type=Type(code=STRING)),
+                StructType.Field(name="age", type=Type(code=INT64)),
+            ]
+        )
+        aborted = _make_rpc_error(Aborted, trailing_metadata=[])
+
+        gax_api = self._make_spanner_api()
+        gax_api.begin_transaction.return_value = TransactionPB(id=b"FACEDACE")
+
+        result_sets = [
+            PartialResultSet(
+                values=VALUE_PBS[0], metadata=ResultSetMetadata(row_type=struct_type_pb)
+            ),
+            PartialResultSet(values=VALUE_PBS[1]),
+        ]
+        result_sets2 = [
+            PartialResultSet(
+                values=VALUE_PBS[1], metadata=ResultSetMetadata(row_type=struct_type_pb)
+            ),
+            PartialResultSet(values=VALUE_PBS[0]),
+        ]
+        gax_api.execute_streaming_sql = mock.Mock(
+            side_effect=[
+                _MockIterator(*result_sets),
+                aborted,
+                _MockIterator(*result_sets2),
+            ]
+        )
+
+        database = _Database()
+        database.spanner_api = gax_api
+        session = self._make_one(database)
+        session._session_id = self.SESSION_ID
+
+        def unit_of_work(txn, *args, **kw):
+            list(txn.execute_sql(SQL_QUERY, PARAMS, PARAM_TYPES, query_mode=2))
+            list(txn.execute_sql(SQL_QUERY2, PARAMS2, PARAM_TYPES, query_mode=2))
+            return "answer"
+
+        with self.assertRaises(RuntimeError):
+            session.run_in_transaction(unit_of_work, "abc", some_arg="def")
+
     def test_run_in_transaction_w_timeout(self):
         from google.api_core.exceptions import Aborted
         from google.cloud.spanner_v1.proto.transaction_pb2 import (

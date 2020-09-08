@@ -14,7 +14,6 @@
 
 """Wrapper for streaming results."""
 
-from google.api_core.exceptions import Aborted
 from google.protobuf.struct_pb2 import ListValue
 from google.protobuf.struct_pb2 import Value
 from google.cloud import exceptions
@@ -170,8 +169,8 @@ class StreamedResultSet(object):
                                 not self._results_checksum
                                 < self._original_results_checksum
                             ):
-                                raise Aborted(
-                                    "The underlying data being changed while retrying."
+                                raise RuntimeError(
+                                    "The underlying data being changed while retrying an aborted transaction."
                                 )
                 yield row
 

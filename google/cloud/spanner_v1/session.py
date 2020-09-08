@@ -340,7 +340,7 @@ class Session(object):
                 attempts += 1
                 return_value = func(txn, *args, **kw)
             except Aborted as exc:
-                if attempts == 0:
+                if attempts == 1:
                     original_results_checksum = self._transaction.results_checksum
                 del self._transaction
                 _delay_until_retry(exc, deadline, attempts)

@@ -787,7 +787,6 @@ class TestStreamedResultSet(unittest.TestCase):
         self.assertTrue(streamed._results_checksum == etalon_cs)
 
     def test___iter___checksum_mismatch(self):
-        from google.api_core.exceptions import Aborted
         from google.cloud.spanner_v1.transaction import ResultsChecksum
 
         BARE = [u"Phred Phlyntstone", 42]
@@ -805,7 +804,7 @@ class TestStreamedResultSet(unittest.TestCase):
         streamed._original_results_checksum = ResultsChecksum()
         streamed._original_results_checksum.consume_result(2)
 
-        with self.assertRaises(Aborted):
+        with self.assertRaises(RuntimeError):
             list(streamed)
 
     def test___iter___one_result_set_partial(self):

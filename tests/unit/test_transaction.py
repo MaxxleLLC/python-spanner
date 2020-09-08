@@ -895,7 +895,6 @@ class TestTransaction(OpenTelemetryBase):
 
     def test_read_checksum_mismatch(self):
         import datetime
-        from google.api_core.exceptions import Aborted
         from google.cloud.spanner_v1.keyset import KeySet
         from google.cloud.spanner_v1.proto.result_set_pb2 import (
             PartialResultSet,
@@ -950,7 +949,7 @@ class TestTransaction(OpenTelemetryBase):
         transaction._original_results_checksum.consume_result(5)
 
         # run reading
-        with self.assertRaises(Aborted):
+        with self.assertRaises(RuntimeError):
             with transaction:
                 list(
                     transaction.read(
@@ -1035,7 +1034,6 @@ SELECT first_name, last_name, email FROM citizens WHERE age <= @max_age"""
 
     def test_execute_sql_checksum_mismatch(self):
         import datetime
-        from google.api_core.exceptions import Aborted
         from google.cloud.spanner_v1.proto.result_set_pb2 import (
             PartialResultSet,
             ResultSetMetadata,
@@ -1095,7 +1093,7 @@ SELECT first_name, last_name, email FROM citizens WHERE age <= @max_age"""
         transaction._original_results_checksum.consume_result(7)
 
         # run SQL query
-        with self.assertRaises(Aborted):
+        with self.assertRaises(RuntimeError):
             with transaction:
                 list(
                     transaction.execute_sql(
