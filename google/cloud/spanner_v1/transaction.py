@@ -373,9 +373,7 @@ class ResultsChecksum:
             other (ResultsChecksum):
                 Another checksum to compare with this one.
         """
-        same_count = self.count != other.count
-        same_checksum = self.checksum.digest() != other.checksum.digest()
-        return same_count or same_checksum
+        return not self == other
 
     def __lt__(self, other):
         """Check if this checksum have less results than the given one.

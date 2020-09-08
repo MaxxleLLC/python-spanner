@@ -296,10 +296,10 @@ class Session(object):
             self._transaction.rolled_back = True
             del self._transaction
 
-        txn = self._transaction = Transaction(
+        self._transaction = Transaction(
             self, original_results_checksum=original_results_checksum
         )
-        return txn
+        return self._transaction
 
     def run_in_transaction(self, func, *args, **kw):
         """Perform a unit of work in a transaction, retrying on abort.
