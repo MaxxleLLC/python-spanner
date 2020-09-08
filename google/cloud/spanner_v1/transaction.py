@@ -19,9 +19,9 @@ import pickle
 
 from google.protobuf.struct_pb2 import Struct
 
-from google.api_core.exceptions import Aborted
 from google.cloud._helpers import _pb_timestamp_to_datetime
 from google.cloud.spanner_v1._helpers import (
+    _compare_checksums,
     _make_value_pb,
     _merge_query_options,
     _metadata_with_prefix,
@@ -252,11 +252,7 @@ class Transaction(_SnapshotBase, _BatchBase):
             )
         self._results_checksum.consume_result(response.stats.row_count_exact)
 
-        if self._original_results_checksum is not None:
-            if self._results_checksum != self._original_results_checksum:
-                if not self._results_checksum < self._original_results_checksum:
-                    raise Aborted("The underlying data being changed while retrying.")
-
+        _compare_checksums(self._original_results_checksum, self._results_checksum)
         return response.stats.row_count_exact
 
     def batch_update(self, statements):
@@ -319,11 +315,7 @@ class Transaction(_SnapshotBase, _BatchBase):
         ]
         self._results_checksum.consume_result(row_counts)
 
-        if self._original_results_checksum is not None:
-            if self._results_checksum != self._original_results_checksum:
-                if not self._results_checksum < self._original_results_checksum:
-                    raise Aborted("The underlying data being changed while retrying.")
-
+        _compare_checksums(self._original_results_checksum, self._results_checksum)
         return response.status, row_counts
 
     def __enter__(self):

@@ -256,3 +256,24 @@ def _metadata_with_prefix(prefix, **kw):
         List[Tuple[str, str]]: RPC metadata with supplied prefix
     """
     return [("google-cloud-resource-prefix", prefix)]
+
+
+def _compare_checksums(original, retried):
+    """Compare the given checksums.
+
+    Raise an error if the given checksums are not equal.
+
+    :type original: :class:`~google.cloud.spanner_v1.transaction.ResultsChecksum`
+    :param original: results checksum of the original transaction.
+
+    :type retried: :class:`~google.cloud.spanner_v1.transaction.ResultsChecksum`
+    :param retried: results checksum of the retried transaction.
+
+    :raises: :class:`RuntimeError` in case if checksums are not equal.
+    """
+    if original is not None:
+        if retried != original:
+            if not retried < original:
+                raise RuntimeError(
+                    "The underlying data being changed while retrying an aborted transaction."
+                )

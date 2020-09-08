@@ -512,7 +512,6 @@ class TestTransaction(OpenTelemetryBase):
         self.assertTrue(etalon_checksum == transaction.results_checksum)
 
     def test_execute_update_checksum_mismatch(self):
-        from google.api_core.exceptions import Aborted
         from google.cloud.spanner_v1.proto.result_set_pb2 import (
             ResultSet,
             ResultSetStats,
@@ -534,7 +533,7 @@ class TestTransaction(OpenTelemetryBase):
         transaction._original_results_checksum = ResultsChecksum()
         transaction._original_results_checksum.consume_result(10)
 
-        with self.assertRaises(Aborted):
+        with self.assertRaises(RuntimeError):
             transaction.execute_update(
                 DML_QUERY_WITH_PARAM, PARAMS, PARAM_TYPES, query_mode=2
             )
@@ -724,7 +723,6 @@ class TestTransaction(OpenTelemetryBase):
         self.assertTrue(etalon_checksum == transaction.results_checksum)
 
     def test_batch_update_checksum_mismatch(self):
-        from google.api_core.exceptions import Aborted
         from google.rpc.status_pb2 import Status
         from google.cloud.spanner_v1.proto.result_set_pb2 import ResultSet
         from google.cloud.spanner_v1.proto.result_set_pb2 import ResultSetStats
@@ -758,7 +756,7 @@ class TestTransaction(OpenTelemetryBase):
 
         dml_statements = [(insert_dml, insert_params, insert_param_types), update_dml]
 
-        with self.assertRaises(Aborted):
+        with self.assertRaises(RuntimeError):
             transaction.batch_update(dml_statements)
 
     def test_context_mgr_success(self):

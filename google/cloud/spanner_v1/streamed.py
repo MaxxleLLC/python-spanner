@@ -18,6 +18,7 @@ from google.protobuf.struct_pb2 import ListValue
 from google.protobuf.struct_pb2 import Value
 from google.cloud import exceptions
 from google.cloud.spanner_v1.proto import type_pb2
+from google.cloud.spanner_v1._helpers import _compare_checksums
 import six
 
 # pylint: disable=ungrouped-imports
@@ -162,16 +163,9 @@ class StreamedResultSet(object):
                 row = iter_rows.pop(0)
                 if self._results_checksum is not None:
                     self._results_checksum.consume_result(row)
-
-                    if self._original_results_checksum is not None:
-                        if self._results_checksum != self._original_results_checksum:
-                            if (
-                                not self._results_checksum
-                                < self._original_results_checksum
-                            ):
-                                raise RuntimeError(
-                                    "The underlying data being changed while retrying an aborted transaction."
-                                )
+                    _compare_checksums(
+                        self._original_results_checksum, self._results_checksum
+                    )
                 yield row
 
     def one(self):

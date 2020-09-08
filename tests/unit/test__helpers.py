@@ -526,3 +526,48 @@ class Test_metadata_with_prefix(unittest.TestCase):
         prefix = "prefix"
         metadata = self._call_fut(prefix)
         self.assertEqual(metadata, [("google-cloud-resource-prefix", prefix)])
+
+
+class Test_compare_checksums(unittest.TestCase):
+    def _cal_fut(self, *args, **kw):
+        from google.cloud.spanner_v1._helpers import _compare_checksums
+
+        return _compare_checksums(*args, **kw)
+
+    def test_no_original(self):
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        self._cal_fut(None, ResultsChecksum())
+
+    def test_equal(self):
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        original = ResultsChecksum()
+        original.consume_result(5)
+
+        retried = ResultsChecksum()
+        retried.consume_result(5)
+
+        self._cal_fut(original, retried)
+
+    def test_less_results(self):
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        original = ResultsChecksum()
+        original.consume_result(5)
+
+        retried = ResultsChecksum()
+
+        self._cal_fut(original, retried)
+
+    def test_mismatch(self):
+        from google.cloud.spanner_v1.transaction import ResultsChecksum
+
+        original = ResultsChecksum()
+        original.consume_result(5)
+
+        retried = ResultsChecksum()
+        retried.consume_result(2)
+
+        with self.assertRaises(RuntimeError):
+            self._cal_fut(original, retried)
