@@ -764,7 +764,7 @@ class TestStreamedResultSet(unittest.TestCase):
         found = list(streamed)
         self.assertEqual(found, [])
 
-    def test___iter___checksum(self):
+    def test___iter___checksums_equal(self):
         from google.cloud.spanner_v1.transaction import ResultsChecksum
 
         BARE = [u"Phred Phlyntstone", 42]

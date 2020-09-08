@@ -873,8 +873,6 @@ class TestTransaction(OpenTelemetryBase):
         )
         api.streaming_read = mock.Mock(return_value=_MockIterator(*result_sets))
 
-        checksum = ResultsChecksum()
-
         # run reading
         with transaction:
             results = list(
@@ -886,6 +884,7 @@ class TestTransaction(OpenTelemetryBase):
             )
 
         # calculate expected checksum
+        checksum = ResultsChecksum()
         for row in results:
             checksum.consume_result(row)
 
@@ -1014,8 +1013,6 @@ SELECT first_name, last_name, email FROM citizens WHERE age <= @max_age"""
         )
         api.execute_streaming_sql = mock.Mock(return_value=_MockIterator(*result_sets))
 
-        checksum = ResultsChecksum()
-
         # run SQL query
         with transaction:
             results = list(
@@ -1025,6 +1022,7 @@ SELECT first_name, last_name, email FROM citizens WHERE age <= @max_age"""
             )
 
         # calculate expected checksum
+        checksum = ResultsChecksum()
         for row in results:
             checksum.consume_result(row)
 

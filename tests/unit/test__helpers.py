@@ -534,7 +534,7 @@ class Test_compare_checksums(unittest.TestCase):
 
         return _compare_checksums(*args, **kw)
 
-    def test_no_original(self):
+    def test_no_original_checksum(self):
         from google.cloud.spanner_v1.transaction import ResultsChecksum
 
         self._cal_fut(None, ResultsChecksum())

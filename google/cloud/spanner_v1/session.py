@@ -304,6 +304,13 @@ class Session(object):
     def run_in_transaction(self, func, *args, **kw):
         """Perform a unit of work in a transaction, retrying on abort.
 
+        While executing the transaction operations a checksum
+        of their results is calculated. On aborted transaction
+        retry the checksum of the original transaction is compared
+        with the checksum of the retried transaction to ensure
+        the retried transaction has the same results that the
+        original one have had before abortion.
+
         :type func: callable
         :param func: takes a required positional argument, the transaction,
                      and additional positional / keyword arguments as supplied
@@ -323,6 +330,8 @@ class Session(object):
 
         :raises Exception:
             reraises any non-ABORT execptions raised by ``func``.
+        :raises: :exc:`RuntimeError` in case the data changed while
+                 retrying an aborted transaction.
         """
         deadline = time.time() + kw.pop("timeout_secs", DEFAULT_RETRY_TIMEOUT_SECS)
         original_results_checksum = None
@@ -355,7 +364,7 @@ class Session(object):
             try:
                 txn.commit()
             except Aborted as exc:
-                if attempts == 0:
+                if attempts == 1:
                     original_results_checksum = self._transaction.results_checksum
                 del self._transaction
                 _delay_until_retry(exc, deadline, attempts)

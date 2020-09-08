@@ -57,7 +57,7 @@ class Transaction(_SnapshotBase, _BatchBase):
             raise ValueError("Session has existing transaction.")
 
         super(Transaction, self).__init__(session)
-        self._results_checksum = ResultsChecksum()
+        self._results_checksum = ResultsChecksum()  # this transaction results checksum
         self._original_results_checksum = original_results_checksum
 
     @property

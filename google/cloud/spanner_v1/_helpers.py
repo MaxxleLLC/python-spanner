@@ -261,7 +261,10 @@ def _metadata_with_prefix(prefix, **kw):
 def _compare_checksums(original, retried):
     """Compare the given checksums.
 
-    Raise an error if the given checksums are not equal.
+    Raise an error if the given checksums are not equal
+    (the only exclusion is the case when retried checksum
+    not yet consumed the same amount of results that
+    the original did).
 
     :type original: :class:`~google.cloud.spanner_v1.transaction.ResultsChecksum`
     :param original: results checksum of the original transaction.
@@ -269,11 +272,11 @@ def _compare_checksums(original, retried):
     :type retried: :class:`~google.cloud.spanner_v1.transaction.ResultsChecksum`
     :param retried: results checksum of the retried transaction.
 
-    :raises: :class:`RuntimeError` in case if checksums are not equal.
+    :raises: :exc:`RuntimeError` in case if checksums are not equal.
     """
     if original is not None:
         if retried != original:
-            if not retried < original:
+            if not retried < original:  # retried has less results
                 raise RuntimeError(
                     "The underlying data being changed while retrying an aborted transaction."
                 )

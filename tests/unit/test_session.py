@@ -1147,21 +1147,28 @@ class TestSession(OpenTelemetryBase):
         )
 
     def test_run_in_transaction_w_abort_checksum_mismatch(self):
+        """
+        Run a transaction with two operations. Abort a second
+        operation to start a transaction retry, but return
+        new results for the first operation, so that results
+        checksums of the original and the retried transaction
+        become different.
+        """
         from google.api_core.exceptions import Aborted
         from google.cloud.spanner_v1.proto.transaction_pb2 import (
             Transaction as TransactionPB,
         )
-        from google.cloud.spanner_v1._helpers import _make_value_pb
         from google.cloud.spanner_v1.proto.result_set_pb2 import (
             PartialResultSet,
             ResultSetMetadata,
         )
         from google.cloud.spanner_v1.proto.type_pb2 import (
-            STRING,
             INT64,
+            STRING,
             Type,
             StructType,
         )
+        from google.cloud.spanner_v1._helpers import _make_value_pb
         from .test_snapshot import _MockIterator
         from .test_transaction import _Database
 
@@ -1203,11 +1210,10 @@ SELECT last_name FROM citizens WHERE age > @max_age"""
         gax_api.execute_streaming_sql = mock.Mock(
             side_effect=[
                 _MockIterator(*result_sets),
-                aborted,
-                _MockIterator(*result_sets2),
+                aborted,  # error for the second operation
+                _MockIterator(*result_sets2),  # new results for the first operation
             ]
         )
-
         database = _Database()
         database.spanner_api = gax_api
         session = self._make_one(database)
