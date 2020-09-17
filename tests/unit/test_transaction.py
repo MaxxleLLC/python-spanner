@@ -12,6 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import hashlib
+import pickle
 import mock
 import unittest
 from tests._helpers import OpenTelemetryBase, StatusCanonicalCode
@@ -1108,21 +1110,27 @@ class TestResultsChecksum(unittest.TestCase):
         return self._getTargetClass()()
 
     def test_consume_result_row(self):
-        ETALON_CHECKSUM = b"\x822\xea\x0ep\xfd\xe6%\x01!\xe6\xb0A?\x11k\xdc\xde\x0c\x0cn\xbcH\x1e\xdf\x12\xb7\xd1:\x1d\x08\xfc"
+        ROW = ["val1", "val2"]
+
+        etalon_checksum = hashlib.sha256()
+        etalon_checksum.update(pickle.dumps(ROW))
 
         checksum = self._make_one()
-        checksum.consume_result(["val1", "val2"])
+        checksum.consume_result(ROW)
 
-        self.assertEqual(checksum.checksum.digest(), ETALON_CHECKSUM)
+        self.assertEqual(checksum.checksum.digest(), etalon_checksum.digest())
         self.assertEqual(checksum.count, 1)
 
     def test_consume_result_int(self):
-        ETALON_CHECKSUM = b"l\x0e\xb4\xa6\xdeeU\xa3.\x85\x93u-\xee \xd1B\x1a\x96\xfd\xed\x96\x1a\xb3y\xb5\xb7\x12a\x0e4\xec"
+        COUNT = 5
+
+        etalon_checksum = hashlib.sha256()
+        etalon_checksum.update(pickle.dumps(COUNT))
 
         checksum = self._make_one()
-        checksum.consume_result(5)
+        checksum.consume_result(COUNT)
 
-        self.assertEqual(checksum.checksum.digest(), ETALON_CHECKSUM)
+        self.assertEqual(checksum.checksum.digest(), etalon_checksum.digest())
         self.assertEqual(checksum.count, 1)
 
     def test_comparison(self):

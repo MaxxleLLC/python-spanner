@@ -358,15 +358,6 @@ class ResultsChecksum:
         same_checksum = self.checksum.digest() == other.checksum.digest()
         return same_count and same_checksum
 
-    def __ne__(self, other):
-        """Check if checksums aren't equal.
-
-        Args:
-            other (ResultsChecksum):
-                Another checksum to compare with this one.
-        """
-        return not self == other
-
     def __lt__(self, other):
         """Check if this checksum have less results than the given one.
 

@@ -537,7 +537,7 @@ class Test_compare_checksums(unittest.TestCase):
     def test_no_original_checksum(self):
         from google.cloud.spanner_v1.transaction import ResultsChecksum
 
-        self._cal_fut(None, ResultsChecksum())
+        self.assertIsNone(self._cal_fut(None, ResultsChecksum()))
 
     def test_equal(self):
         from google.cloud.spanner_v1.transaction import ResultsChecksum
@@ -548,7 +548,7 @@ class Test_compare_checksums(unittest.TestCase):
         retried = ResultsChecksum()
         retried.consume_result(5)
 
-        self._cal_fut(original, retried)
+        self.assertIsNone(self._cal_fut(original, retried))
 
     def test_less_results(self):
         from google.cloud.spanner_v1.transaction import ResultsChecksum
@@ -558,7 +558,7 @@ class Test_compare_checksums(unittest.TestCase):
 
         retried = ResultsChecksum()
 
-        self._cal_fut(original, retried)
+        self.assertIsNone(self._cal_fut(original, retried))
 
     def test_mismatch(self):
         from google.cloud.spanner_v1.transaction import ResultsChecksum
