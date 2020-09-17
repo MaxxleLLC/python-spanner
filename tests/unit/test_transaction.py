@@ -1145,17 +1145,17 @@ class TestResultsChecksum(unittest.TestCase):
         for part in DATA[:2]:
             checksum2.consume_result(part)
 
-        self.assertTrue(checksum2 < checksum1)
         self.assertTrue(checksum2 != checksum1)
         self.assertFalse(checksum2 == checksum1)
+        self.assertNotEqual(len(checksum1), len(checksum2))
 
         checksum2.consume_result(DATA[2])
         self.assertTrue(checksum2 == checksum1)
+        self.assertEqual(len(checksum1), len(checksum2))
 
         checksum2.count = 5
-        self.assertFalse(checksum2 < checksum1)
-        self.assertFalse(checksum2 == checksum1)
-        self.assertTrue(checksum2 != checksum1)
+        self.assertTrue(checksum2 == checksum1)
+        self.assertNotEqual(len(checksum1), len(checksum2))
 
 
 class _Client(object):

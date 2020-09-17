@@ -347,6 +347,14 @@ class ResultsChecksum:
         self.checksum = hashlib.sha256()
         self.count = 0  # counter of consumed results
 
+    def __len__(self):
+        """Return the number of consumed results.
+
+        Returns:
+            int: The number of results.
+        """
+        return self.count
+
     def __eq__(self, other):
         """Check if checksums are equal.
 
@@ -354,18 +362,7 @@ class ResultsChecksum:
             other (ResultsChecksum):
                 Another checksum to compare with this one.
         """
-        same_count = self.count == other.count
-        same_checksum = self.checksum.digest() == other.checksum.digest()
-        return same_count and same_checksum
-
-    def __lt__(self, other):
-        """Check if this checksum have less results than the given one.
-
-        Args:
-            other (ResultsChecksum):
-                Another checksum to compare with this one.
-        """
-        return self.count < other.count
+        return self.checksum.digest() == other.checksum.digest()
 
     def consume_result(self, result):
         """Add the given result into the checksum.

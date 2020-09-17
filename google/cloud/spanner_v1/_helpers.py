@@ -275,8 +275,7 @@ def _compare_checksums(original, retried):
     :raises: :exc:`RuntimeError` in case if checksums are not equal.
     """
     if original is not None:
-        if retried != original:
-            if not retried < original:  # retried has less results
-                raise RuntimeError(
-                    "The underlying data being changed while retrying an aborted transaction."
-                )
+        if len(retried) == len(original) and retried != original:
+            raise RuntimeError(
+                "The underlying data being changed while retrying an aborted transaction."
+            )
