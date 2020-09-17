@@ -261,10 +261,8 @@ def _metadata_with_prefix(prefix, **kw):
 def _compare_checksums(original, retried):
     """Compare the given checksums.
 
-    Raise an error if the given checksums are not equal
-    (the only exclusion is the case when retried checksum
-    not yet consumed the same amount of results that
-    the original did).
+    Raise an error if the given checksums have consumed
+    the same number of results, but are not equal.
 
     :type original: :class:`~google.cloud.spanner_v1.transaction.ResultsChecksum`
     :param original: results checksum of the original transaction.
