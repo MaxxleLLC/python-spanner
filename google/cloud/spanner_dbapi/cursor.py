@@ -210,7 +210,20 @@ class Cursor(object):
             if classification == parse_utils.STMT_NON_UPDATING:
                 self._handle_DQL(sql, args or None)
             elif classification == parse_utils.STMT_INSERT:
-                _helpers.handle_insert(self.connection, sql, args or None)
+                # Read INFORMATION_SCHEMA.COLUMNS to get the Spanner types for
+                # the columns included in this insert
+                table_name, columns = parse_utils.get_table_cols_for_insert(sql)
+                schema = self.get_table_column_schema(table_name)
+                column_type_names = [
+                    schema[col].spanner_type.split("(")[0] for col in columns
+                ]
+                param_types = [
+                    parse_utils.COL_TYPE_NAME_TO_TYPE[ctn] for ctn in column_type_names
+                ]
+
+                _helpers.handle_insert(
+                    self.connection, sql, args or None, param_types=param_types
+                )
             else:
                 self.connection.database.run_in_transaction(
                     self._do_execute_update, sql, args or None
